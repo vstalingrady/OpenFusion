@@ -77,9 +77,9 @@ The final synthesized answer prints to **stdout**. Progress, branch status, and 
 
 | Config | Branches | Best for |
 |--------|----------|----------|
-| `review-panel` | Claude Sonnet 4.5 + GPT-5 + Gemini 2.5 Pro | Code review, PR review |
-| `architecture` | Claude Sonnet 4.5 + GPT-5 + Gemini 2.5 Pro | Architecture decisions |
-| `self-critique` | Claude Sonnet 4.5 + GPT-5 + Gemini 2.5 Pro | Pressure-test a plan or decision |
+| `review-panel` | Claude Sonnet 4.6 + GPT-5.5 + Gemini 3.1 Pro | Code review, PR review |
+| `architecture` | Claude Sonnet 4.6 + GPT-5.5 + Gemini 3.1 Pro | Architecture decisions |
+| `self-critique` | Claude Sonnet 4.6 + GPT-5.5 + Gemini 3.1 Pro | Pressure-test a plan or decision |
 | `budget-panel` | Llama 3.3 70B (Groq) + Qwen 2.5 Coder (Groq) + Llama 3.3 70B (Cerebras) | Fast, near-free reviews |
 
 See [`fusion.json`](fusion.json) for the full config schema and all branch prompts.
@@ -92,29 +92,34 @@ OpenFusion talks to any OpenAI-compatible, Anthropic-compatible, or Google Gemin
 
 | Provider | API shape | Key env var | Auto-detected model prefixes |
 |----------|-----------|-------------|------------------------------|
-| OpenAI | OpenAI | `OPENAI_API_KEY` | `gpt-`, `o1`, `o3`, `o4` |
+| OpenAI | OpenAI | `OPENAI_API_KEY` | `gpt-` |
 | Anthropic | Claude | `ANTHROPIC_API_KEY` | `claude-` |
-| OpenRouter | OpenAI | `OPENROUTER_API_KEY` | `minimax-`, `qwen`, `kimi`, `glm-`, `mimo` |
 | Google Gemini | Gemini | `GEMINI_API_KEY` | `gemini-`, `gemma-` |
+| OpenRouter | OpenAI | `OPENROUTER_API_KEY` | — (use `openrouter/vendor/model`) |
 | Groq | OpenAI | `GROQ_API_KEY` | — |
-| xAI | OpenAI | `XAI_API_KEY` | `grok-` |
-| Mistral | OpenAI | `MISTRAL_API_KEY` | `mistral-`, `mixtral-` |
-| DeepSeek | OpenAI | `DEEPSEEK_API_KEY` | `deepseek-` |
-| Together | OpenAI | `TOGETHER_API_KEY` | `llama-` |
+| xAI | OpenAI | `XAI_API_KEY` | — (use `xai/grok-4.3`) |
+| Mistral | OpenAI | `MISTRAL_API_KEY` | — (use `mistral/mistral-large-latest`) |
+| DeepSeek | OpenAI | `DEEPSEEK_API_KEY` | — (use `deepseek/deepseek-v4-pro`) |
+| Together | OpenAI | `TOGETHER_API_KEY` | — |
 | Fireworks | OpenAI | `FIREWORKS_API_KEY` | — |
 | Cerebras | OpenAI | `CEREBRAS_API_KEY` | — |
+
+Only `gpt-`, `claude-`, `gemini-`, and `gemma-` auto-detect (matching [OmniRoute](https://github.com/diegosouzapw/OmniRoute)'s inference rules). Every other model — `deepseek-v4-pro`, `grok-4.3`, `glm-5.2`, `kimi-k2.6`, `qwen3.6-plus`, `minimax-m3`, `mistral-large-latest`, `llama-3.3-70b` — needs an explicit `provider/model` prefix, because most are served by multiple providers and a bare name would be ambiguous.
 
 ### Specifying a model
 
 Use a `provider/model` prefix to be explicit, or let OpenFusion auto-detect from the model name:
 
 ```json
-"openai/gpt-5"                        // explicit provider
-"anthropic/claude-sonnet-4-5"         // explicit provider
-"openrouter/google/gemini-2.5-pro"    // OpenRouter routing to Gemini
-"gpt-5"                               // auto-detected -> openai
-"claude-sonnet-4-5"                   // auto-detected -> anthropic
-"gemini-2.5-pro"                      // auto-detected -> gemini
+"openai/gpt-5.5"                       // explicit provider
+"anthropic/claude-sonnet-4-6"          // explicit provider
+"gemini/gemini-3.1-pro-preview"        // explicit provider
+"openrouter/anthropic/claude-opus-4-7" // OpenRouter routing to Claude
+"deepseek/deepseek-v4-pro"             // explicit provider
+"gpt-5.5"                              // auto-detected -> openai
+"claude-sonnet-4-6"                    // auto-detected -> anthropic
+"gemini-3.1-pro-preview"               // auto-detected -> gemini
+"deepseek-v4-pro"                      // NO auto-detect -> use deepseek/deepseek-v4-pro
 ```
 
 ---
@@ -163,12 +168,12 @@ Edit `fusion.json` — each config follows this shape:
 {
   "my-config": {
     "branches": [
-      { "model": "anthropic/claude-sonnet-4-5", "prompt": "Focus on...", "timeout": 120000 },
-      { "model": "openai/gpt-5", "prompt": "Argue against...", "timeout": 120000 },
-      { "model": "openrouter/google/gemini-2.5-pro", "prompt": "Find a simpler path...", "timeout": 120000 }
+      { "model": "anthropic/claude-sonnet-4-6", "prompt": "Focus on...", "timeout": 120000 },
+      { "model": "openai/gpt-5.5", "prompt": "Argue against...", "timeout": 120000 },
+      { "model": "gemini/gemini-3.1-pro-preview", "prompt": "Find a simpler path...", "timeout": 120000 }
     ],
-    "judge": { "model": "openai/gpt-5-mini", "prompt": "Rank by..." },
-    "synthesizer": { "model": "anthropic/claude-sonnet-4-5", "prompt": "Combine into..." },
+    "judge": { "model": "openai/gpt-5.4-mini", "prompt": "Rank by..." },
+    "synthesizer": { "model": "anthropic/claude-sonnet-4-6", "prompt": "Combine into..." },
     "limits": { "timeout": 180000, "maxBranches": 4 }
   }
 }

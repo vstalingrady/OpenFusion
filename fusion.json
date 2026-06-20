@@ -2,27 +2,27 @@
   "review-panel": {
     "branches": [
       {
-        "model": "anthropic/claude-sonnet-4-5",
+        "model": "anthropic/claude-sonnet-4-6",
         "prompt": "Focus on implementation correctness, edge cases, and maintainability. Cite file:line where possible.",
         "timeout": 120000
       },
       {
-        "model": "openai/gpt-5",
+        "model": "openai/gpt-5.5",
         "prompt": "Focus on product behavior, user impact, and missing tests. What breaks for the user?",
         "timeout": 120000
       },
       {
-        "model": "openrouter/google/gemini-2.5-pro",
+        "model": "gemini/gemini-3.1-pro-preview",
         "prompt": "Challenge the approach. Propose a simpler implementation path if one exists.",
         "timeout": 120000
       }
     ],
     "judge": {
-      "model": "openai/gpt-5-mini",
+      "model": "openai/gpt-5.4-mini",
       "prompt": "Rank the branch outputs by correctness, specificity, and risk coverage. Prefer concrete file references over vague claims."
     },
     "synthesizer": {
-      "model": "anthropic/claude-sonnet-4-5",
+      "model": "anthropic/claude-sonnet-4-6",
       "prompt": "Combine the strongest findings into one concise answer with concrete next steps. Deduplicate. Lead with the highest-risk item."
     },
     "limits": {
@@ -34,27 +34,27 @@
   "architecture": {
     "branches": [
       {
-        "model": "anthropic/claude-sonnet-4-5",
+        "model": "anthropic/claude-sonnet-4-6",
         "prompt": "Evaluate the architecture for correctness and long-term maintainability. Identify load-bearing assumptions.",
         "timeout": 120000
       },
       {
-        "model": "openai/gpt-5",
+        "model": "openai/gpt-5.5",
         "prompt": "Argue the opposing side. What is the weakest part of this design? What would break at 10x scale?",
         "timeout": 120000
       },
       {
-        "model": "openrouter/google/gemini-2.5-pro",
+        "model": "gemini/gemini-3.1-pro-preview",
         "prompt": "Focus on build feasibility for a small team. What is the cheapest version that still solves the core problem?",
         "timeout": 120000
       }
     ],
     "judge": {
-      "model": "openai/gpt-5-mini",
+      "model": "openai/gpt-5.4-mini",
       "prompt": "Rank the branches by depth of analysis and actionability. Flag any branch making claims without evidence."
     },
     "synthesizer": {
-      "model": "anthropic/claude-sonnet-4-5",
+      "model": "anthropic/claude-sonnet-4-6",
       "prompt": "Synthesize one recommendation with: the decision, the key tradeoff, and the concrete first step. Note dissent."
     },
     "limits": {
@@ -66,27 +66,27 @@
   "self-critique": {
     "branches": [
       {
-        "model": "anthropic/claude-sonnet-4-5",
+        "model": "anthropic/claude-sonnet-4-6",
         "prompt": "Attack the plan for correctness and hidden assumptions. Where is it wrong, not just suboptimal?",
         "timeout": 120000
       },
       {
-        "model": "openai/gpt-5",
+        "model": "openai/gpt-5.5",
         "prompt": "Attack the plan from the market/distribution side. Why will no one care or pay? Be specific.",
         "timeout": 120000
       },
       {
-        "model": "openrouter/google/gemini-2.5-pro",
+        "model": "gemini/gemini-3.1-pro-preview",
         "prompt": "Attack the plan for execution risk. What kills this in 14 days? What is the cheapest way to find out it is wrong?",
         "timeout": 120000
       }
     ],
     "judge": {
-      "model": "openai/gpt-5-mini",
+      "model": "openai/gpt-5.4-mini",
       "prompt": "Rank critiques by severity and how falsifiable they are. Vague doomcasting ranks last."
     },
     "synthesizer": {
-      "model": "anthropic/claude-sonnet-4-5",
+      "model": "anthropic/claude-sonnet-4-6",
       "prompt": "Produce one verdict: does the plan survive? List the top 3 attacks that landed, and the single change that most improves survival odds."
     },
     "limits": {

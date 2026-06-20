@@ -14,6 +14,10 @@ Usage:
   fusion.py <config-name> <prompt>
   fusion.py review-panel "Review the auth refactor for correctness risks."
 
+  # custom panel at runtime (comma-separated models):
+  fusion.py --models "openai/gpt-5.5,anthropic/claude-sonnet-4-6,gemini/gemini-3.1-pro-preview" "prompt"
+  fusion.py --models "m1,m2,m3" --judge "mJ" --synth "mS" "prompt"
+
 Configs live in fusion.json next to this script.
 Set the API key via env vars (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...) or a
 .key file next to this script.
@@ -112,29 +116,22 @@ PROVIDERS = {
 }
 
 # Model-prefix -> provider, used when the model has no explicit provider/.
-# Order matters: first match wins.
+# Matches OmniRoute's inference rules (open-sse/services/model.ts):
+#   ^gpt-  -> openai
+#   ^claude- -> anthropic
+#   ^gemini- | ^gemma- -> gemini
+# Everything else (deepseek-, grok-, glm-, kimi, qwen, minimax-, mistral-,
+# llama, gpt-oss-, mimo-, ...) requires an explicit `provider/model` prefix.
 PREFIX_RULES = [
     ("gpt-", "openai"),
-    ("o1", "openai"),
-    ("o3", "openai"),
-    ("o4", "openai"),
     ("claude-", "anthropic"),
     ("gemini-", "gemini"),
     ("gemma-", "gemini"),
-    ("deepseek-", "deepseek"),
-    ("minimax-", "openrouter"),
-    ("qwen", "openrouter"),
-    ("kimi", "openrouter"),
-    ("glm-", "openrouter"),
-    ("mimo", "openrouter"),
-    ("grok-", "xai"),
-    ("mistral-", "mistral"),
-    ("mixtral-", "mistral"),
-    ("llama-", "together"),
 ]
 
-# Models known to use the Anthropic messages shape even on OpenRouter.
-ANTHROPIC_SHAPE_MODELS = {"minimax-m3", "minimax-m2.7", "minimax-m2.5"}
+# Models known to use the Anthropic messages shape on providers that otherwise
+# look OpenAI-compatible. Add bare ids here only if a provider's docs say so.
+ANTHROPIC_SHAPE_MODELS = set()
 
 
 def log(msg):
@@ -150,13 +147,13 @@ def load_key(provider_id):
     key = os.environ.get(env_var)
     if key:
         return key.strip()
-    local_key = os.path.join(HERE, ".key")
-    if os.path.exists(local_key):
-        with open(local_key) as f:
-            return f.read().strip()
     local_key_named = os.path.join(HERE, f".key.{provider_id}")
     if os.path.exists(local_key_named):
         with open(local_key_named) as f:
+            return f.read().strip()
+    local_key = os.path.join(HERE, ".key")
+    if os.path.exists(local_key):
+        with open(local_key) as f:
             return f.read().strip()
     sys.exit(
         f"ERROR: no API key for provider '{provider_id}'. "
@@ -317,18 +314,72 @@ def run_branch(branch, prompt, label):
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
+def build_adhoc_config(models, judge_model, synth_model):
+    """Build a config dict from a comma-separated model list (--models flag)."""
+    branch_list = [m.strip() for m in models.split(",") if m.strip()]
+    if not branch_list:
+        sys.exit("ERROR: --models needs at least one model id")
+    branches = [
+        {"model": m, "prompt": "Answer the prompt independently and thoroughly. Cite specifics.", "timeout": 120000}
+        for m in branch_list
+    ]
+    j = judge_model or branch_list[0]
+    s = synth_model or branch_list[0]
+    return {
+        "branches": branches,
+        "judge": {"model": j, "prompt": "Rank the branch outputs by correctness, specificity, and risk coverage."},
+        "synthesizer": {"model": s, "prompt": "Combine the strongest findings into one concise answer with concrete next steps. Deduplicate."},
+        "limits": {"timeout": 180000, "maxBranches": 8},
+    }
+
+
 def main():
-    if len(sys.argv) < 3:
-        sys.exit("Usage: fusion.py <config-name> <prompt>")
-    config_name = sys.argv[1]
-    prompt = " ".join(sys.argv[2:])
+    args = sys.argv[1:]
+    if len(args) < 2:
+        sys.exit(
+            "Usage:\n"
+            "  fusion.py <config-name> <prompt>\n"
+            "  fusion.py --models \"m1,m2,m3\" [--judge mJ] [--synth mS] <prompt>"
+        )
 
-    configs = load_configs()
+    custom_models = None
+    custom_judge = None
+    custom_synth = None
+    positional = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--models":
+            custom_models = args[i + 1]
+            i += 2
+        elif a == "--judge":
+            custom_judge = args[i + 1]
+            i += 2
+        elif a == "--synth":
+            custom_synth = args[i + 1]
+            i += 2
+        else:
+            positional.append(a)
+            i += 1
 
-    if config_name not in configs:
-        avail = ", ".join(configs.keys())
-        sys.exit(f"ERROR: config '{config_name}' not found. Available: {avail}")
-    cfg = configs[config_name]
+    if not positional:
+        sys.exit("ERROR: missing prompt")
+    if custom_models:
+        config_name = "custom"
+        cfg = build_adhoc_config(custom_models, custom_judge, custom_synth)
+        prompt = " ".join(positional)
+    else:
+        if not positional:
+            sys.exit("ERROR: missing config name and prompt")
+        config_name = positional[0]
+        prompt = " ".join(positional[1:])
+        if not prompt:
+            sys.exit("ERROR: missing prompt")
+        configs = load_configs()
+        if config_name not in configs:
+            avail = ", ".join(configs.keys())
+            sys.exit(f"ERROR: config '{config_name}' not found. Available: {avail}")
+        cfg = configs[config_name]
 
     branches = cfg.get("branches", [])
     judge = cfg.get("judge", {})

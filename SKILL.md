@@ -33,9 +33,9 @@ Configs live in `fusion.json` next to the runner. Four ship by default:
 
 | Config | Branches | Best for |
 |--------|----------|----------|
-| `review-panel` | Claude Sonnet 4.5 + GPT-5 + Gemini 2.5 Pro | Code review, PR review |
-| `architecture` | Claude Sonnet 4.5 + GPT-5 + Gemini 2.5 Pro | Architecture decisions |
-| `self-critique` | Claude Sonnet 4.5 + GPT-5 + Gemini 2.5 Pro | Pressure-test a plan or decision |
+| `review-panel` | Claude Sonnet 4.6 + GPT-5.5 + Gemini 3.1 Pro | Code review, PR review |
+| `architecture` | Claude Sonnet 4.6 + GPT-5.5 + Gemini 3.1 Pro | Architecture decisions |
+| `self-critique` | Claude Sonnet 4.6 + GPT-5.5 + Gemini 3.1 Pro | Pressure-test a plan or decision |
 | `budget-panel` | Llama 3.3 70B (Groq) + Qwen 2.5 Coder (Groq) + Llama 3.3 70B (Cerebras) | Fast, near-free reviews |
 
 ### Example
@@ -56,17 +56,17 @@ Each named config follows this schema:
 {
   "my-config": {
     "branches": [
-      { "model": "anthropic/claude-sonnet-4-5", "prompt": "Focus on...", "timeout": 120000 },
-      { "model": "openai/gpt-5", "prompt": "Argue against...", "timeout": 120000 }
+      { "model": "anthropic/claude-sonnet-4-6", "prompt": "Focus on...", "timeout": 120000 },
+      { "model": "openai/gpt-5.5", "prompt": "Argue against...", "timeout": 120000 }
     ],
-    "judge": { "model": "openai/gpt-5-mini", "prompt": "Rank by..." },
-    "synthesizer": { "model": "anthropic/claude-sonnet-4-5", "prompt": "Combine into..." },
+    "judge": { "model": "openai/gpt-5.4-mini", "prompt": "Rank by..." },
+    "synthesizer": { "model": "anthropic/claude-sonnet-4-6", "prompt": "Combine into..." },
     "limits": { "timeout": 180000, "maxBranches": 4 }
   }
 }
 ```
 
-- `branches[].model` — any model id. Use `provider/model` to be explicit (e.g. `openai/gpt-5`, `anthropic/claude-sonnet-4-5`, `openrouter/google/gemini-2.5-pro`), or a bare name for auto-detection (`gpt-5`, `claude-sonnet-4-5`, `gemini-2.5-pro`).
+- `branches[].model` — any model id. Use `provider/model` to be explicit (e.g. `openai/gpt-5.5`, `anthropic/claude-sonnet-4-6`, `gemini/gemini-3.1-pro-preview`), or a bare name for auto-detection (`gpt-5.5`, `claude-sonnet-4-6`, `gemini-3.1-pro-preview`). Only `gpt-`, `claude-`, `gemini-`, `gemma-` auto-detect; everything else (deepseek, grok, glm, kimi, qwen, minimax, mistral, llama, ...) needs an explicit `provider/model` prefix.
 - `branches[].prompt` — the angle/instruction for that branch.
 - `branches[].timeout` — per-branch ms budget.
 - `judge` / `synthesizer` — single model each, run after branches complete.
@@ -76,15 +76,15 @@ Each named config follows this schema:
 
 | Provider | Key env var | Auto-detected prefixes |
 |----------|-------------|------------------------|
-| OpenAI | `OPENAI_API_KEY` | `gpt-`, `o1`, `o3`, `o4` |
+| OpenAI | `OPENAI_API_KEY` | `gpt-` |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-` |
-| OpenRouter | `OPENROUTER_API_KEY` | `minimax-`, `qwen`, `kimi`, `glm-`, `mimo` |
+| OpenRouter | `OPENROUTER_API_KEY` | — (use `openrouter/vendor/model`) |
 | Google Gemini | `GEMINI_API_KEY` | `gemini-`, `gemma-` |
 | Groq | `GROQ_API_KEY` | — |
-| xAI | `XAI_API_KEY` | `grok-` |
-| Mistral | `MISTRAL_API_KEY` | `mistral-`, `mixtral-` |
-| DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-` |
-| Together | `TOGETHER_API_KEY` | `llama-` |
+| xAI | `XAI_API_KEY` | — |
+| Mistral | `MISTRAL_API_KEY` | — |
+| DeepSeek | `DEEPSEEK_API_KEY` | — |
+| Together | `TOGETHER_API_KEY` | — |
 | Fireworks | `FIREWORKS_API_KEY` | — |
 | Cerebras | `CEREBRAS_API_KEY` | — |
 

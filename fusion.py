@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """
-Local Fusion runner for opencode-go.
+OpenFusion — local compound model orchestration.
 
-Fan out one prompt to multiple model branches, ask a judge model to rank
-the branch outputs, then have a synthesizer model produce one final answer.
+Fan out one prompt to multiple model branches (across any provider),
+ask a judge model to rank the branch outputs, then have a synthesizer
+model produce one final answer.
 
-Calls opencode-go directly (https://opencode.ai/zen/go/v1) — no local proxy.
-Reads the API key from ~/Downloads/opencode.txt (Windows) or $OPENCODE_GO_KEY.
+Supports any OpenAI-compatible, Anthropic-compatible, Google Gemini, or
+OpenRouter endpoint. Provider is auto-detected from the model name, or set
+explicitly with a `provider/model` prefix.
 
 Usage:
   fusion.py <config-name> <prompt>
   fusion.py review-panel "Review the auth refactor for correctness risks."
 
 Configs live in fusion.json next to this script.
+Set the API key via env vars (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...) or a
+.key file next to this script.
 """
 import json
 import os
@@ -20,38 +24,144 @@ import sys
 import time
 import urllib.request
 import urllib.error
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-BASE = "https://opencode.ai/zen/go/v1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-ANTHROPIC_MODELS = {
-    "minimax-m3", "minimax-m2.7", "minimax-m2.5",
-    "qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus",
+# ---------------------------------------------------------------------------
+# Provider registry — inspired by OmniRoute's provider config.
+# Each entry: base URL, API shape, auth header style, extra headers.
+# https://github.com/diegosouzapw/OmniRoute
+# ---------------------------------------------------------------------------
+PROVIDERS = {
+    "openai": {
+        "base": "https://api.openai.com/v1",
+        "format": "openai",
+        "auth": "bearer",
+        "key_env": "OPENAI_API_KEY",
+    },
+    "anthropic": {
+        "base": "https://api.anthropic.com/v1",
+        "format": "claude",
+        "auth": "x-api-key",
+        "key_env": "ANTHROPIC_API_KEY",
+        "headers": {"anthropic-version": "2023-06-01"},
+    },
+    "openrouter": {
+        "base": "https://openrouter.ai/api/v1",
+        "format": "openai",
+        "auth": "bearer",
+        "key_env": "OPENROUTER_API_KEY",
+        "headers": {"HTTP-Referer": "https://github.com/vstalingrady/OpenFusion",
+                     "X-Title": "OpenFusion"},
+    },
+    "gemini": {
+        "base": "https://generativelanguage.googleapis.com/v1beta",
+        "format": "gemini",
+        "auth": "x-goog-api-key",
+        "key_env": "GEMINI_API_KEY",
+    },
+    "groq": {
+        "base": "https://api.groq.com/openai/v1",
+        "format": "openai",
+        "auth": "bearer",
+        "key_env": "GROQ_API_KEY",
+    },
+    "xai": {
+        "base": "https://api.x.ai/v1",
+        "format": "openai",
+        "auth": "bearer",
+        "key_env": "XAI_API_KEY",
+    },
+    "mistral": {
+        "base": "https://api.mistral.ai/v1",
+        "format": "openai",
+        "auth": "bearer",
+        "key_env": "MISTRAL_API_KEY",
+    },
+    "deepseek": {
+        "base": "https://api.deepseek.com/v1",
+        "format": "openai",
+        "auth": "bearer",
+        "key_env": "DEEPSEEK_API_KEY",
+    },
+    "together": {
+        "base": "https://api.together.xyz/v1",
+        "format": "openai",
+        "auth": "bearer",
+        "key_env": "TOGETHER_API_KEY",
+    },
+    "fireworks": {
+        "base": "https://api.fireworks.ai/inference/v1",
+        "format": "openai",
+        "auth": "bearer",
+        "key_env": "FIREWORKS_API_KEY",
+    },
+    "cerebras": {
+        "base": "https://api.cerebras.ai/v1",
+        "format": "openai",
+        "auth": "bearer",
+        "key_env": "CEREBRAS_API_KEY",
+    },
+    "opencode": {
+        "base": "https://opencode.ai/zen/go/v1",
+        "format": "openai",
+        "auth": "bearer",
+        "key_env": "OPENCODE_GO_KEY",
+    },
 }
+
+# Model-prefix -> provider, used when the model has no explicit provider/.
+# Order matters: first match wins.
+PREFIX_RULES = [
+    ("gpt-", "openai"),
+    ("o1", "openai"),
+    ("o3", "openai"),
+    ("o4", "openai"),
+    ("claude-", "anthropic"),
+    ("gemini-", "gemini"),
+    ("gemma-", "gemini"),
+    ("deepseek-", "deepseek"),
+    ("minimax-", "openrouter"),
+    ("qwen", "openrouter"),
+    ("kimi", "openrouter"),
+    ("glm-", "openrouter"),
+    ("mimo", "openrouter"),
+    ("grok-", "xai"),
+    ("mistral-", "mistral"),
+    ("mixtral-", "mistral"),
+    ("llama-", "together"),
+]
+
+# Models known to use the Anthropic messages shape even on OpenRouter.
+ANTHROPIC_SHAPE_MODELS = {"minimax-m3", "minimax-m2.7", "minimax-m2.5"}
 
 
 def log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
-def load_key():
-    key = os.environ.get("OPENCODE_GO_KEY")
+# ---------------------------------------------------------------------------
+# Key resolution
+# ---------------------------------------------------------------------------
+def load_key(provider_id):
+    cfg = PROVIDERS[provider_id]
+    env_var = cfg["key_env"]
+    key = os.environ.get(env_var)
     if key:
         return key.strip()
     local_key = os.path.join(HERE, ".key")
     if os.path.exists(local_key):
         with open(local_key) as f:
             return f.read().strip()
-    for path in (
-        "/mnt/c/Users/vstal/Downloads/opencode.txt",
-        os.path.expanduser("~/Downloads/opencode.txt"),
-        os.path.expanduser("~/opencode.txt"),
-    ):
-        if os.path.exists(path):
-            with open(path) as f:
-                return f.read().strip()
-    sys.exit("ERROR: no opencode-go key. Set OPENCODE_GO_KEY, create .key next to fusion.py, or ~/Downloads/opencode.txt")
+    local_key_named = os.path.join(HERE, f".key.{provider_id}")
+    if os.path.exists(local_key_named):
+        with open(local_key_named) as f:
+            return f.read().strip()
+    sys.exit(
+        f"ERROR: no API key for provider '{provider_id}'. "
+        f"Set ${env_var}, create .key next to fusion.py, or .key.{provider_id}"
+    )
 
 
 def load_configs():
@@ -60,48 +170,86 @@ def load_configs():
         return json.load(f)
 
 
-def call_model(model, system, user, key, timeout_ms, max_tokens=2048):
-    """Call opencode-go. Routes to OpenAI-shape or Anthropic-shape endpoint."""
-    timeout = max((timeout_ms or 120000) / 1000, 30)
-    is_anthropic = any(model.startswith(m.split("-")[0] + "-") or model == m
-                       for m in ANTHROPIC_MODELS) or model in ANTHROPIC_MODELS
-    if model in ANTHROPIC_MODELS:
-        is_anthropic = True
-    elif model.startswith(("minimax-", "qwen3.")):
-        is_anthropic = True
-    else:
-        is_anthropic = False
+# ---------------------------------------------------------------------------
+# Provider / model resolution
+# ---------------------------------------------------------------------------
+def resolve_provider(model_str):
+    """Resolve a model string to (provider_id, model_id, api_format).
 
-    ua = "opencode-fusion/1.0 (+https://opencode.ai)"
-    if is_anthropic:
-        url = f"{BASE}/messages"
+    Accepts:
+      - "provider/model"       -> explicit provider
+      - "openrouter/openai/gpt-5" -> openrouter, model "openai/gpt-5"
+      - "gpt-5"               -> auto-detect via PREFIX_RULES
+    """
+    if "/" in model_str:
+        head, rest = model_str.split("/", 1)
+        if head in PROVIDERS:
+            return head, rest, PROVIDERS[head]["format"]
+    for prefix, provider_id in PREFIX_RULES:
+        if model_str.lower().startswith(prefix):
+            fmt = PROVIDERS[provider_id]["format"]
+            if model_str in ANTHROPIC_SHAPE_MODELS:
+                fmt = "claude"
+            return provider_id, model_str, fmt
+    return "openai", model_str, "openai"
+
+
+# ---------------------------------------------------------------------------
+# Model calls — shape-aware (openai / claude / gemini)
+# ---------------------------------------------------------------------------
+def call_model(model_str, system, user, key, timeout_ms, max_tokens=2048):
+    provider_id, model_id, fmt = resolve_provider(model_str)
+    cfg = PROVIDERS[provider_id]
+    timeout = max((timeout_ms or 120000) / 1000, 30)
+    ua = "openfusion/1.0 (+https://github.com/vstalingrady/OpenFusion)"
+
+    if fmt == "claude":
+        url = f"{cfg['base']}/messages"
         headers = {
             "x-api-key": key,
             "Content-Type": "application/json",
-            "anthropic-version": "2023-06-01",
             "User-Agent": ua,
         }
+        for k, v in cfg.get("headers", {}).items():
+            headers[k] = v
         body = {
-            "model": model,
+            "model": model_id,
             "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": user}],
         }
         if system:
             body["system"] = system
         payload = json.dumps(body).encode()
-    else:
-        url = f"{BASE}/chat/completions"
+
+    elif fmt == "gemini":
+        url = f"{cfg['base']}/models/{model_id}:generateContent"
+        headers = {
+            "x-goog-api-key": key,
+            "Content-Type": "application/json",
+            "User-Agent": ua,
+        }
+        contents = [{"role": "user", "parts": [{"text": user}]}]
+        body = {"contents": contents}
+        if system:
+            body["systemInstruction"] = {"parts": [{"text": system}]}
+        body["generationConfig"] = {"maxOutputTokens": max_tokens}
+        payload = json.dumps(body).encode()
+
+    else:  # openai shape
+        url = f"{cfg['base']}/chat/completions"
         headers = {
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
             "User-Agent": ua,
         }
+        for k, v in cfg.get("headers", {}).items():
+            headers[k] = v
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": user})
         body = {
-            "model": model,
+            "model": model_id,
             "messages": messages,
             "stream": False,
             "max_tokens": max_tokens,
@@ -128,11 +276,22 @@ def call_model(model, system, user, key, timeout_ms, max_tokens=2048):
     else:
         return None, last_err or "request failed"
 
-    if is_anthropic:
+    return _extract_text(data, fmt)
+
+
+def _extract_text(data, fmt):
+    if fmt == "claude":
         texts = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
         out = "".join(texts)
         return (out, None) if out else (None, "empty output")
-    else:
+    elif fmt == "gemini":
+        candidates = data.get("candidates", [])
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            out = "".join(p.get("text", "") for p in parts if "text" in p)
+            return (out, None) if out else (None, "empty output")
+        return None, "empty response"
+    else:  # openai
         choices = data.get("choices", [])
         if choices:
             msg = choices[0].get("message", {})
@@ -141,11 +300,13 @@ def call_model(model, system, user, key, timeout_ms, max_tokens=2048):
     return None, "empty response"
 
 
-def run_branch(branch, prompt, key, label):
+def run_branch(branch, prompt, label):
     model = branch["model"]
     sys_prompt = branch.get("prompt", "")
     tmo = branch.get("timeout", 120000)
     t0 = time.time()
+    provider_id, _, _ = resolve_provider(model)
+    key = load_key(provider_id)
     out, err = call_model(model, sys_prompt, prompt, key, tmo, max_tokens=4096)
     elapsed = round(time.time() - t0, 1)
     if err:
@@ -153,13 +314,15 @@ def run_branch(branch, prompt, key, label):
     return label, model, out, None, elapsed
 
 
+# ---------------------------------------------------------------------------
+# Orchestration
+# ---------------------------------------------------------------------------
 def main():
     if len(sys.argv) < 3:
         sys.exit("Usage: fusion.py <config-name> <prompt>")
     config_name = sys.argv[1]
     prompt = " ".join(sys.argv[2:])
 
-    key = load_key()
     configs = load_configs()
 
     if config_name not in configs:
@@ -195,7 +358,7 @@ def main():
     results = {}
     with ThreadPoolExecutor(max_workers=len(branches)) as pool:
         futures = {
-            pool.submit(run_branch, b, prompt, key, labels[i]): i
+            pool.submit(run_branch, b, prompt, labels[i]): i
             for i, b in enumerate(branches)
         }
         for fut in as_completed(futures, timeout=max(overall_timeout / 1000, 30)):
@@ -209,7 +372,6 @@ def main():
         sys.exit("ERROR: all branches failed")
 
     elapsed_so_far = time.time() - t_start
-    remaining = max(deadline - time.time(), 10)
     log("")
     log(f"branches done in {round(elapsed_so_far,1)}s | judging...")
 
@@ -223,9 +385,11 @@ def main():
         f"Rank the branch outputs. For each branch give: rank (1=best), "
         f"one-line strength, one-line weakness. Then name the single strongest branch."
     )
+    j_provider, _, _ = resolve_provider(judge["model"])
+    j_key = load_key(j_provider)
     judge_out, jerr = call_model(
-        judge["model"], judge.get("prompt", ""), judge_user, key,
-        int(remaining * 1000), max_tokens=1024,
+        judge["model"], judge.get("prompt", ""), judge_user, j_key,
+        int(max(deadline - time.time(), 15) * 1000), max_tokens=1024,
     )
     if jerr:
         log(f"  judge FAIL: {jerr} — synthesizing from branches directly")
@@ -241,8 +405,10 @@ def main():
         f"Produce ONE final answer that combines the strongest findings. "
         f"Be concise and concrete. Include next steps where useful."
     )
+    s_provider, _, _ = resolve_provider(synthesizer["model"])
+    s_key = load_key(s_provider)
     synth_out, serr = call_model(
-        synthesizer["model"], synthesizer.get("prompt", ""), synth_user, key,
+        synthesizer["model"], synthesizer.get("prompt", ""), synth_user, s_key,
         int(max(deadline - time.time(), 20) * 1000), max_tokens=2048,
     )
     if serr:

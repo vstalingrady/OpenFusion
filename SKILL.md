@@ -1,11 +1,11 @@
 ---
 name: fusion
-description: Fan out one prompt to multiple opencode-go model branches, judge the results, and synthesize one final answer. Use when the cost of a shallow single-model answer is higher than extra model calls — code reviews, architecture tradeoffs, migration planning, self-critique of a plan, or any high-stakes decision needing independent perspectives. Trigger keywords: fusion, review panel, local fusion, self-critique, pressure-test, multiple models, second opinion, red-team.
+description: Fan out one prompt to multiple model branches across any provider (OpenAI, Anthropic, Gemini, OpenRouter, Groq, ...), judge the results, and synthesize one final answer. Use when the cost of a shallow single-model answer is higher than extra model calls — code reviews, architecture tradeoffs, migration planning, self-critique of a plan, or any high-stakes decision needing independent perspectives. Trigger keywords: fusion, review panel, local fusion, self-critique, pressure-test, multiple models, second opinion, red-team.
 ---
 
 # Fusion — Local compound model orchestration
 
-Fusion sends the same prompt to several opencode-go model branches in parallel, asks a judge model to rank the branch outputs, then has a synthesizer model collapse them into one final answer. It calls opencode-go directly (`https://opencode.ai/zen/go/v1`) — no local proxy.
+Fusion sends the same prompt to several model branches in parallel, asks a judge model to rank the branch outputs, then has a synthesizer model collapse them into one final answer. Each branch can use a different model from a different provider — OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, xAI, Mistral, DeepSeek, and more.
 
 ## When to use
 
@@ -22,72 +22,99 @@ Do NOT use Fusion for routine edits, small questions, or anything where a single
 Run the Python runner with a named config and the prompt:
 
 ```bash
-python3 ~/.config/opencode/skills/fusion/fusion.py <config-name> <prompt>
+python3 fusion.py <config-name> <prompt>
 ```
 
 The final synthesized answer prints to **stdout** (use it directly). Progress, branch status, and timing print to **stderr**.
 
 ### Named configs
 
-Configs live in `~/.config/opencode/skills/fusion/fusion.json`. Three ship by default:
+Configs live in `fusion.json` next to the runner. Four ship by default:
 
 | Config | Branches | Best for |
 |--------|----------|----------|
-| `review-panel` | glm-5.2 (correctness) + deepseek-v4-pro (product/tests) + minimax-m3 (simpler path) | Code review, PR review |
-| `architecture` | glm-5.2 (maintainability) + deepseek-v4-pro (opposing side) + minimax-m3 (cheapest build) | Architecture decisions |
-| `self-critique` | glm-5.2 (correctness) + deepseek-v4-pro (market) + minimax-m3 (execution risk) | Pressure-test a plan or decision |
-
-All configs use **glm-5.2** as both judge and synthesizer.
+| `review-panel` | Claude Sonnet 4.5 + GPT-5 + Gemini 2.5 Pro | Code review, PR review |
+| `architecture` | Claude Sonnet 4.5 + GPT-5 + Gemini 2.5 Pro | Architecture decisions |
+| `self-critique` | Claude Sonnet 4.5 + GPT-5 + Gemini 2.5 Pro | Pressure-test a plan or decision |
+| `budget-panel` | Llama 3.3 70B (Groq) + Qwen 2.5 Coder (Groq) + Llama 3.3 70B (Cerebras) | Fast, near-free reviews |
 
 ### Example
 
 ```bash
-python3 ~/.config/opencode/skills/fusion/fusion.py review-panel "Review the auth refactor in src/auth.ts. Identify correctness risks, security regressions, missing tests, and any simpler implementation path. Return prioritized findings with file references."
+python3 fusion.py review-panel "Review the auth refactor in src/auth.ts. Identify correctness risks, security regressions, missing tests, and any simpler implementation path. Return prioritized findings with file references."
 ```
 
 ```bash
-python3 ~/.config/opencode/skills/fusion/fusion.py self-critique "Plan: 14-day cold-DM outreach to Shopee sellers for a Rp 1.5jt money-leak audit. Zero budget, zero network. Critique for correctness, market risk, and execution risk."
+python3 fusion.py self-critique "Plan: migrate a monolith Rails app to a modular service architecture over 3 months. Critique for correctness, market risk, and execution risk."
 ```
 
 ## Config shape
 
-Each named config matches the panwar-stack `local_fusion` schema:
+Each named config follows this schema:
 
 ```json
 {
-  "review-panel": {
+  "my-config": {
     "branches": [
-      { "model": "glm-5.2", "prompt": "Focus on...", "timeout": 120000 }
+      { "model": "anthropic/claude-sonnet-4-5", "prompt": "Focus on...", "timeout": 120000 },
+      { "model": "openai/gpt-5", "prompt": "Argue against...", "timeout": 120000 }
     ],
-    "judge": { "model": "deepseek-v4-flash", "prompt": "Rank by..." },
-    "synthesizer": { "model": "glm-5.2", "prompt": "Combine into..." },
+    "judge": { "model": "openai/gpt-5-mini", "prompt": "Rank by..." },
+    "synthesizer": { "model": "anthropic/claude-sonnet-4-5", "prompt": "Combine into..." },
     "limits": { "timeout": 180000, "maxBranches": 4 }
   }
 }
 ```
 
-- `branches[].model` — any opencode-go model id (e.g. `glm-5.2`, `deepseek-v4-flash`, `kimi-k2.6`, `minimax-m3`). Use the bare id, NOT the `opencode-go/` prefix.
+- `branches[].model` — any model id. Use `provider/model` to be explicit (e.g. `openai/gpt-5`, `anthropic/claude-sonnet-4-5`, `openrouter/google/gemini-2.5-pro`), or a bare name for auto-detection (`gpt-5`, `claude-sonnet-4-5`, `gemini-2.5-pro`).
 - `branches[].prompt` — the angle/instruction for that branch.
 - `branches[].timeout` — per-branch ms budget.
 - `judge` / `synthesizer` — single model each, run after branches complete.
 - `limits.timeout` — overall orchestration budget (ms). `limits.maxBranches` — caps branch count.
 
-## Available opencode-go models
+## Supported providers
 
-GLM-5, GLM-5.1, GLM-5.2, Kimi K2.5/K2.6/K2.7-code, DeepSeek V4 Pro/Flash, MiMo V2.5/V2.5-Pro/V2-Pro/V2-Omni, MiniMax M3/M2.7/M2.5, Qwen3.7 Max/Plus, Qwen3.6/3.5 Plus, HY3-preview. Run `curl -s https://opencode.ai/zen/go/v1/models -H "Authorization: Bearer $(cat ~/Downloads/opencode.txt)"` for the live list.
+| Provider | Key env var | Auto-detected prefixes |
+|----------|-------------|------------------------|
+| OpenAI | `OPENAI_API_KEY` | `gpt-`, `o1`, `o3`, `o4` |
+| Anthropic | `ANTHROPIC_API_KEY` | `claude-` |
+| OpenRouter | `OPENROUTER_API_KEY` | `minimax-`, `qwen`, `kimi`, `glm-`, `mimo` |
+| Google Gemini | `GEMINI_API_KEY` | `gemini-`, `gemma-` |
+| Groq | `GROQ_API_KEY` | — |
+| xAI | `XAI_API_KEY` | `grok-` |
+| Mistral | `MISTRAL_API_KEY` | `mistral-`, `mixtral-` |
+| DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-` |
+| Together | `TOGETHER_API_KEY` | `llama-` |
+| Fireworks | `FIREWORKS_API_KEY` | — |
+| Cerebras | `CEREBRAS_API_KEY` | — |
 
 ## Key + auth
 
-The runner reads the API key from (in order):
-1. `$OPENCODE_GO_KEY` env var
-2. `~/.config/opencode/skills/fusion/.key` (Linux-side, 600 perms — survives restarts even if WSL /mnt/c mount is slow)
-3. `/mnt/c/Users/vstal/Downloads/opencode.txt` (Windows Downloads, WSL fallback)
-4. `~/Downloads/opencode.txt`
+The runner reads keys per-provider from environment variables. Set the ones for the providers you use:
 
-To rotate the key: `printf '%s' "<new-key>" > ~/.config/opencode/skills/fusion/.key && chmod 600 ~/.config/opencode/skills/fusion/.key`
+```bash
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENROUTER_API_KEY="sk-or-..."
+```
 
-## Limitations vs the native panwar-stack tool
+Alternatively, drop a key file next to `fusion.py`:
 
-- **No tool access in branches.** The native `local_fusion` tool can give branches `toolPolicy: "readonly"` to let them read files via opencode. This skill's branches answer from the prompt text only — paste relevant code/context into the prompt so branches can reason about it.
-- **`variant` is accepted but ignored** (opencode-internal concept; opencode-go has no variant API).
-- **Config is sidecar JSON**, not `opencode.json` — stock opencode rejects the `local_fusion:` top-level key, so configs live in `fusion.json` next to the runner.
+```bash
+printf '%s' "<key>" > .key && chmod 600 .key              # default fallback
+printf '%s' "<key>" > .key.openai && chmod 600 .key.openai # provider-specific
+```
+
+## Custom config file
+
+Point to a custom config with `FUSION_CONFIG`:
+
+```bash
+FUSION_CONFIG=~/.config/my-fusions.json python3 fusion.py my-config "..."
+```
+
+## Limitations
+
+- **No tool access in branches.** Branches answer from the prompt text only — paste relevant code/context into the prompt so branches can reason about it.
+- **Non-streaming.** The final answer prints all at once when complete.
+- **No automatic retries across providers.** If a branch fails, it's dropped; the judge and synthesizer work with whatever branches succeeded.

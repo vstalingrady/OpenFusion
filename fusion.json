@@ -1,129 +1,32 @@
 {
-  "review-panel": {
-    "branches": [
-      {
-        "model": "anthropic/claude-sonnet-4-6",
-        "prompt": "Focus on implementation correctness, edge cases, and maintainability. Cite file:line where possible.",
-        "timeout": 120000
-      },
-      {
-        "model": "openai/gpt-5.5",
-        "prompt": "Focus on product behavior, user impact, and missing tests. What breaks for the user?",
-        "timeout": 120000
-      },
-      {
-        "model": "gemini/gemini-3.1-pro-preview",
-        "prompt": "Challenge the approach. Propose a simpler implementation path if one exists.",
-        "timeout": 120000
-      }
-    ],
-    "judge": {
-      "model": "openai/gpt-5.4-mini",
-      "prompt": "Rank the branch outputs by correctness, specificity, and risk coverage. Prefer concrete file references over vague claims."
+  "providers": {
+    "openai": {
+      "base": "https://api.openai.com/v1",
+      "shape": "openai",
+      "auth": "bearer",
+      "key_env": "OPENAI_API_KEY"
     },
-    "synthesizer": {
-      "model": "anthropic/claude-sonnet-4-6",
-      "prompt": "Combine the strongest findings into one concise answer with concrete next steps. Deduplicate. Lead with the highest-risk item."
+    "anthropic": {
+      "base": "https://api.anthropic.com/v1",
+      "shape": "claude",
+      "auth": "x-api-key",
+      "key_env": "ANTHROPIC_API_KEY",
+      "headers": { "anthropic-version": "2023-06-01" }
     },
-    "limits": {
-      "timeout": 180000,
-      "maxBranches": 4
+    "gemini": {
+      "base": "https://generativelanguage.googleapis.com/v1beta",
+      "shape": "gemini",
+      "auth": "x-goog-api-key",
+      "key_env": "GEMINI_API_KEY"
+    },
+    "openrouter": {
+      "base": "https://openrouter.ai/api/v1",
+      "shape": "openai",
+      "auth": "bearer",
+      "key_env": "OPENROUTER_API_KEY",
+      "headers": { "X-Title": "OpenFusion" }
     }
   },
 
-  "architecture": {
-    "branches": [
-      {
-        "model": "anthropic/claude-sonnet-4-6",
-        "prompt": "Evaluate the architecture for correctness and long-term maintainability. Identify load-bearing assumptions.",
-        "timeout": 120000
-      },
-      {
-        "model": "openai/gpt-5.5",
-        "prompt": "Argue the opposing side. What is the weakest part of this design? What would break at 10x scale?",
-        "timeout": 120000
-      },
-      {
-        "model": "gemini/gemini-3.1-pro-preview",
-        "prompt": "Focus on build feasibility for a small team. What is the cheapest version that still solves the core problem?",
-        "timeout": 120000
-      }
-    ],
-    "judge": {
-      "model": "openai/gpt-5.4-mini",
-      "prompt": "Rank the branches by depth of analysis and actionability. Flag any branch making claims without evidence."
-    },
-    "synthesizer": {
-      "model": "anthropic/claude-sonnet-4-6",
-      "prompt": "Synthesize one recommendation with: the decision, the key tradeoff, and the concrete first step. Note dissent."
-    },
-    "limits": {
-      "timeout": 180000,
-      "maxBranches": 4
-    }
-  },
-
-  "self-critique": {
-    "branches": [
-      {
-        "model": "anthropic/claude-sonnet-4-6",
-        "prompt": "Attack the plan for correctness and hidden assumptions. Where is it wrong, not just suboptimal?",
-        "timeout": 120000
-      },
-      {
-        "model": "openai/gpt-5.5",
-        "prompt": "Attack the plan from the market/distribution side. Why will no one care or pay? Be specific.",
-        "timeout": 120000
-      },
-      {
-        "model": "gemini/gemini-3.1-pro-preview",
-        "prompt": "Attack the plan for execution risk. What kills this in 14 days? What is the cheapest way to find out it is wrong?",
-        "timeout": 120000
-      }
-    ],
-    "judge": {
-      "model": "openai/gpt-5.4-mini",
-      "prompt": "Rank critiques by severity and how falsifiable they are. Vague doomcasting ranks last."
-    },
-    "synthesizer": {
-      "model": "anthropic/claude-sonnet-4-6",
-      "prompt": "Produce one verdict: does the plan survive? List the top 3 attacks that landed, and the single change that most improves survival odds."
-    },
-    "limits": {
-      "timeout": 180000,
-      "maxBranches": 4
-    }
-  },
-
-  "budget-panel": {
-    "branches": [
-      {
-        "model": "groq/llama-3.3-70b-versatile",
-        "prompt": "Focus on implementation correctness, edge cases, and maintainability. Cite file:line where possible.",
-        "timeout": 60000
-      },
-      {
-        "model": "groq/qwen-2.5-coder-32b",
-        "prompt": "Focus on product behavior, user impact, and missing tests. What breaks for the user?",
-        "timeout": 60000
-      },
-      {
-        "model": "cerebras/llama-3.3-70b",
-        "prompt": "Challenge the approach. Propose a simpler implementation path if one exists.",
-        "timeout": 60000
-      }
-    ],
-    "judge": {
-      "model": "groq/llama-3.3-70b-versatile",
-      "prompt": "Rank the branch outputs by correctness, specificity, and risk coverage."
-    },
-    "synthesizer": {
-      "model": "groq/llama-3.3-70b-versatile",
-      "prompt": "Combine the strongest findings into one concise answer with concrete next steps. Deduplicate."
-    },
-    "limits": {
-      "timeout": 90000,
-      "maxBranches": 4
-    }
-  }
+  "configs": {}
 }
